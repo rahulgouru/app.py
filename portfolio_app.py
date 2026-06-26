@@ -1,7 +1,7 @@
-
 import streamlit as st
 import pandas as pd
 import json
+import os
 import plotly.express as px
 from datetime import datetime, date
 
@@ -78,21 +78,27 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Persistent Session State setup
+# File DB Path setup
+DB_FILE = "portfolio_db.json"
+
+# Load data helper
+def load_data():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            try:
+                return json.load(f)
+            except:
+                return []
+    return []
+
+# Save data helper
+def save_data(data):
+    with open(DB_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+# Load current records to session state so it dynamic updates
 if "portfolio_records" not in st.session_state:
-    st.session_state.portfolio_records = [
-        {
-            "Chain": "Solana", 
-            "Token": "WIF", 
-            "Balance": 450.0, 
-            "Current Price": 2.85,
-            "Buy Price": 1.50,
-            "Buy Date": "2026-03-10",
-            "Status": "Active",
-            "Sell Price": 0.0,
-            "Sell Date": ""
-        }
-    ]
+    st.session_state.portfolio_records = load_data()
 
 records = st.session_state.portfolio_records
 
@@ -105,24 +111,6 @@ def format_price(val):
 # Sidebar layout
 st.sidebar.markdown("<h2 style='font-family:\"Space Grotesk\", sans-serif; color: #8b5cf6;'>💜 Controls Panel</h2>", unsafe_allow_html=True)
 
-# --- BACKUP & RESTORE MODULE ---
-with st.sidebar.expander("💾 Backup & Restore Ledger", expanded=False):
-    st.markdown("<p style='font-size:0.8rem; color:#94a3b8;'>మీ డేటా పోకుండా ఉండటానికి ఈ క్రింది కోడ్‌ని కాపీ చేసి దాచుకోండి.</p>", unsafe_allow_html=True)
-    json_string = json.dumps(records, indent=2)
-    st.text_area("Your Backup Code:", value=json_string, height=100)
-    
-    st.markdown("---")
-    restore_code = st.text_area("Paste Backup Code to Restore:", placeholder="Paste your saved JSON code here...")
-    if st.button("Restore Data 🔄", use_container_width=True):
-        if restore_code:
-            try:
-                st.session_state.portfolio_records = json.loads(restore_code)
-                st.toast("Portfolio restored successfully!")
-                st.rerun()
-            except:
-                st.error("Invalid Backup Code!")
-
-st.sidebar.markdown("---")
 st.sidebar.subheader("➕ Add Transaction Record")
 with st.sidebar.form("token_form", clear_on_submit=True):
     chain_choice = st.selectbox("Select Blockchain:", ["Solana", "Base", "Ethereum", "Arbitrum", "Polygon"])
@@ -154,7 +142,8 @@ if submit_btn and token_name:
         "Sell Date": str(sell_date)
     }
     st.session_state.portfolio_records.append(new_record)
-    st.toast(f"Added {token_name} successfully!")
+    save_data(st.session_state.portfolio_records)
+    st.toast(f"Added {token_name} permanently!")
     st.rerun()
 
 # Delete Record functionality
@@ -166,7 +155,8 @@ if len(records) > 0:
     if st.sidebar.button("Delete Selected ❌", use_container_width=True):
         idx_to_drop = int(selected_to_delete.split("Index "))
         st.session_state.portfolio_records.pop(idx_to_drop)
-        st.toast("Record deleted successfully!")
+        save_data(st.session_state.portfolio_records)
+        st.toast("Record deleted permanently!")
         st.rerun()
 
 # Calculations layout main screen
