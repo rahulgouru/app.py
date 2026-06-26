@@ -1,8 +1,9 @@
+
 import streamlit as st
 import pandas as pd
+import json
 import plotly.express as px
 from datetime import datetime, date
-from streamlit_gsheets import GSheetsConnection
 
 # 1. Page Configuration setup
 st.set_page_config(
@@ -77,21 +78,23 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Google Sheets Connector
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Persistent Session State setup
+if "portfolio_records" not in st.session_state:
+    st.session_state.portfolio_records = [
+        {
+            "Chain": "Solana", 
+            "Token": "WIF", 
+            "Balance": 450.0, 
+            "Current Price": 2.85,
+            "Buy Price": 1.50,
+            "Buy Date": "2026-03-10",
+            "Status": "Active",
+            "Sell Price": 0.0,
+            "Sell Date": ""
+        }
+    ]
 
-def load_data_from_sheets():
-    try:
-        # cache clear chesi read cheyadanki ttl=0 vadutunnam
-        df = conn.read(ttl=0)
-        if df is not None and not df.empty:
-            df = df.dropna(subset=["Token"])
-            return df
-        return pd.DataFrame(columns=["Chain", "Token", "Balance", "Current Price", "Buy Price", "Buy Date", "Status", "Sell Price", "Sell Date"])
-    except Exception:
-        return pd.DataFrame(columns=["Chain", "Token", "Balance", "Current Price", "Buy Price", "Buy Date", "Status", "Sell Price", "Sell Date"])
-
-df_data = load_data_from_sheets()
+records = st.session_state.portfolio_records
 
 def format_price(val):
     if val == 0: return "$0.00"
@@ -102,6 +105,24 @@ def format_price(val):
 # Sidebar layout
 st.sidebar.markdown("<h2 style='font-family:\"Space Grotesk\", sans-serif; color: #8b5cf6;'>💜 Controls Panel</h2>", unsafe_allow_html=True)
 
+# --- BACKUP & RESTORE MODULE ---
+with st.sidebar.expander("💾 Backup & Restore Ledger", expanded=False):
+    st.markdown("<p style='font-size:0.8rem; color:#94a3b8;'>మీ డేటా పోకుండా ఉండటానికి ఈ క్రింది కోడ్‌ని కాపీ చేసి దాచుకోండి.</p>", unsafe_allow_html=True)
+    json_string = json.dumps(records, indent=2)
+    st.text_area("Your Backup Code:", value=json_string, height=100)
+    
+    st.markdown("---")
+    restore_code = st.text_area("Paste Backup Code to Restore:", placeholder="Paste your saved JSON code here...")
+    if st.button("Restore Data 🔄", use_container_width=True):
+        if restore_code:
+            try:
+                st.session_state.portfolio_records = json.loads(restore_code)
+                st.toast("Portfolio restored successfully!")
+                st.rerun()
+            except:
+                st.error("Invalid Backup Code!")
+
+st.sidebar.markdown("---")
 st.sidebar.subheader("➕ Add Transaction Record")
 with st.sidebar.form("token_form", clear_on_submit=True):
     chain_choice = st.selectbox("Select Blockchain:", ["Solana", "Base", "Ethereum", "Arbitrum", "Polygon"])
@@ -121,7 +142,7 @@ with st.sidebar.form("token_form", clear_on_submit=True):
     submit_btn = st.form_submit_button("Submit Entry 🚀")
 
 if submit_btn and token_name:
-    new_row = pd.DataFrame([{
+    new_record = {
         "Chain": chain_choice,
         "Token": token_name,
         "Balance": float(new_balance),
@@ -131,29 +152,20 @@ if submit_btn and token_name:
         "Status": status,
         "Sell Price": float(sell_price),
         "Sell Date": str(sell_date)
-    }])
-    
-    updated_df = pd.concat([df_data, new_row], ignore_index=True)
-    
-    # SAFE WRITE METHOD FOR PUBLIC SHEETS VIA STREAMLIT
-    try:
-        conn.update(data=updated_df)
-        st.toast(f"Added {token_name} successfully!")
-        st.rerun()
-    except Exception as e:
-        # Fallback helper write mechanism
-        st.error(f"Write update block issue: Shared permissions allow continuous view. Ensure 'Anyone with link' is set to 'Editor'.")
+    }
+    st.session_state.portfolio_records.append(new_record)
+    st.toast(f"Added {token_name} successfully!")
+    st.rerun()
 
 # Delete Record functionality
 st.sidebar.markdown("---")
 st.sidebar.subheader("🗑️ Delete Record")
-if not df_data.empty:
-    token_list = [f"{row['Token']} ({row['Chain']}) - Index {idx}" for idx, row in df_data.iterrows()]
+if len(records) > 0:
+    token_list = [f"{t['Token']} ({t['Chain']}) - Index {idx}" for idx, t in enumerate(records)]
     selected_to_delete = st.sidebar.selectbox("Select Token to Delete:", token_list)
     if st.sidebar.button("Delete Selected ❌", use_container_width=True):
         idx_to_drop = int(selected_to_delete.split("Index "))
-        updated_df = df_data.drop(idx_to_drop)
-        conn.update(data=updated_df)
+        st.session_state.portfolio_records.pop(idx_to_drop)
         st.toast("Record deleted successfully!")
         st.rerun()
 
@@ -166,23 +178,22 @@ total_investment = 0.0
 solana_value = 0.0
 evm_value = 0.0
 
-if not df_data.empty:
-    for _, row in df_data.iterrows():
-        qty = float(row["Balance"])
-        buy_p = float(row["Buy Price"])
-        curr_p = float(row["Current Price"])
-        cost_basis = qty * buy_p
-        
-        if row["Status"] == "Active":
-            current_value = qty * curr_p
-            if row["Chain"] == "Solana": solana_value += current_value
-            else: evm_value += current_value
-        else:
-            sell_p = float(row["Sell Price"])
-            current_value = qty * sell_p
+for r in records:
+    qty = float(r["Balance"])
+    buy_p = float(r["Buy Price"])
+    curr_p = float(r["Current Price"])
+    cost_basis = qty * buy_p
+    
+    if r["Status"] == "Active":
+        current_value = qty * curr_p
+        if r["Chain"] == "Solana": solana_value += current_value
+        else: evm_value += current_value
+    else:
+        sell_p = float(r["Sell Price"])
+        current_value = qty * sell_p
 
-        total_investment += cost_basis
-        total_portfolio_value += current_value
+    total_investment += cost_basis
+    total_portfolio_value += current_value
 
 total_net_profit = total_portfolio_value - total_investment
 total_pl_pct = (total_net_profit / total_investment * 100) if total_investment > 0 else 0.0
@@ -205,8 +216,8 @@ col_left, col_right = st.columns(2)
 
 with col_left:
     st.markdown("<h3 style='font-family:\"Space Grotesk\", sans-serif; color: #c084fc;'>🔥 Your Positions</h3>", unsafe_allow_html=True)
-    if not df_data.empty:
-        for _, r in df_data.iterrows():
+    if len(records) > 0:
+        for r in records:
             qty = float(r["Balance"])
             buy_p = float(r["Buy Price"])
             curr_p = float(r["Current Price"])
@@ -264,15 +275,15 @@ with col_left:
             </div>
             """, unsafe_allow_html=True)
     else:
-        st.info("No tokens found in Google Sheet. Add some entries!")
+        st.info("No tokens found. Use Sidebar to add fields!")
 
 with col_right:
     st.markdown("<h3 style='font-family:\"Space Grotesk\", sans-serif; color: #c084fc;'>📊 Portfolio Split</h3>", unsafe_allow_html=True)
-    active_tokens = df_data[df_data["Status"] == "Active"] if not df_data.empty else pd.DataFrame()
-    if not active_tokens.empty:
+    active_tokens = [r for r in records if r["Status"] == "Active"]
+    if len(active_tokens) > 0:
         chart_data = pd.DataFrame([
             {"Token": row["Token"], "Value": float(row["Balance"]) * float(row["Current Price"])}
-            for _, row in active_tokens.iterrows()
+            for row in active_tokens
         ])
         fig = px.pie(chart_data, values='Value', names='Token', hole=0.4, color_discrete_sequence=px.colors.sequential.Agsunset)
         fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="#e2e8f0", margin=dict(t=10, b=10, l=10, r=10))
