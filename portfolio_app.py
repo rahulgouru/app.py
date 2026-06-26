@@ -77,43 +77,29 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Google Sheets Connect setup
+# Google Sheets Connector
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# ✅ FIXED: Enhanced data loading with proper type conversion (Line 40-48)
 def load_data_from_sheets():
     try:
-        df = conn.read(ttl="5s")  # 5 seconds cache refreshes
-        # Clear empty rows if any
-        df = df.dropna(subset=["Token"])
-        
-        # ✅ FIX: Ensure numeric columns are properly typed
-        numeric_cols = ["Balance", "Current Price", "Buy Price", "Sell Price"]
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
-        
-        # ✅ FIX: Normalize date columns format
-        for col in ["Buy Date", "Sell Date"]:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime("%Y-%m-%d")
-        
-        return df
-    except Exception as e:
-        st.warning(f"Could not load from Google Sheets: {e}")
-        # Sheet kothadi ayithe blank columns structured dataframe return chesthundi
+        # cache clear chesi read cheyadanki ttl=0 vadutunnam
+        df = conn.read(ttl=0)
+        if df is not None and not df.empty:
+            df = df.dropna(subset=["Token"])
+            return df
+        return pd.DataFrame(columns=["Chain", "Token", "Balance", "Current Price", "Buy Price", "Buy Date", "Status", "Sell Price", "Sell Date"])
+    except Exception:
         return pd.DataFrame(columns=["Chain", "Token", "Balance", "Current Price", "Buy Price", "Buy Date", "Status", "Sell Price", "Sell Date"])
 
 df_data = load_data_from_sheets()
 
-# Precision formatting helper
 def format_price(val):
     if val == 0: return "$0.00"
     elif abs(val) < 0.01: return f"${val:.8f}"
     elif abs(val) < 1.0: return f"${val:.4f}"
     else: return f"${val:,.2f}"
 
-# Sidebar controls panel
+# Sidebar layout
 st.sidebar.markdown("<h2 style='font-family:\"Space Grotesk\", sans-serif; color: #8b5cf6;'>💜 Controls Panel</h2>", unsafe_allow_html=True)
 
 st.sidebar.subheader("➕ Add Transaction Record")
@@ -126,9 +112,8 @@ with st.sidebar.form("token_form", clear_on_submit=True):
     buy_date = st.date_input("Purchase Date:", date.today())
     status = st.selectbox("Status:", ["Active", "Sold (Position Closed)"])
     
-    # ✅ FIXED: Initialize as None, not empty string (Line 61)
     sell_price = 0.0
-    sell_date = None
+    sell_date = ""
     if status == "Sold (Position Closed)":
         sell_price = st.number_input("Sell Price (USD):", min_value=0.0, value=0.0, format="%.8f")
         sell_date = st.date_input("Sell Date:", date.today()).strftime("%Y-%m-%d")
@@ -145,13 +130,19 @@ if submit_btn and token_name:
         "Buy Date": buy_date.strftime("%Y-%m-%d"),
         "Status": status,
         "Sell Price": float(sell_price),
-        "Sell Date": sell_date if sell_date else ""  # Use empty string for inactive positions
+        "Sell Date": str(sell_date)
     }])
     
     updated_df = pd.concat([df_data, new_row], ignore_index=True)
-    conn.update(data=updated_df)
-    st.toast(f"Added {token_name} to Google Sheets!")
-    st.rerun()
+    
+    # SAFE WRITE METHOD FOR PUBLIC SHEETS VIA STREAMLIT
+    try:
+        conn.update(data=updated_df)
+        st.toast(f"Added {token_name} successfully!")
+        st.rerun()
+    except Exception as e:
+        # Fallback helper write mechanism
+        st.error(f"Write update block issue: Shared permissions allow continuous view. Ensure 'Anyone with link' is set to 'Editor'.")
 
 # Delete Record functionality
 st.sidebar.markdown("---")
@@ -160,17 +151,14 @@ if not df_data.empty:
     token_list = [f"{row['Token']} ({row['Chain']}) - Index {idx}" for idx, row in df_data.iterrows()]
     selected_to_delete = st.sidebar.selectbox("Select Token to Delete:", token_list)
     if st.sidebar.button("Delete Selected ❌", use_container_width=True):
-        # ✅ FIXED: Proper index extraction (Line 77)
-        idx_to_drop = int(selected_to_delete.split("Index ")[1])
-        # ✅ FIXED: Reset index after dropping (Line 83)
-        updated_df = df_data.drop(idx_to_drop).reset_index(drop=True)
+        idx_to_drop = int(selected_to_delete.split("Index "))
+        updated_df = df_data.drop(idx_to_drop)
         conn.update(data=updated_df)
-        st.toast("Record deleted from Google Sheets!")
+        st.toast("Record deleted successfully!")
         st.rerun()
 
-# Calculations layout
+# Calculations layout main screen
 st.markdown("<h1 style='font-family:\"Space Grotesk\", sans-serif; text-align: center; color: #a78bfa;'>🌌 Premium Multi-Chain Web3 Ledger</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #94a3b8;'>Google Sheets Secured Live Tracking Ledger</p>", unsafe_allow_html=True)
 st.markdown("---")
 
 total_portfolio_value = 0.0
@@ -178,7 +166,6 @@ total_investment = 0.0
 solana_value = 0.0
 evm_value = 0.0
 
-records_list = []
 if not df_data.empty:
     for _, row in df_data.iterrows():
         qty = float(row["Balance"])
@@ -191,8 +178,7 @@ if not df_data.empty:
             if row["Chain"] == "Solana": solana_value += current_value
             else: evm_value += current_value
         else:
-            # ✅ FIXED: Safe float conversion with default (Line 164)
-            sell_p = float(row["Sell Price"]) if pd.notna(row["Sell Price"]) and row["Sell Price"] else 0.0
+            sell_p = float(row["Sell Price"])
             current_value = qty * sell_p
 
         total_investment += cost_basis
@@ -214,7 +200,7 @@ with col3:
 with col4:
     st.markdown(f'<div class="metric-card"><div style="color:#3b82f6;font-size:0.8rem;font-weight:700;">EVM BAGS</div><div style="color:#f8fafc;font-size:1.8rem;font-weight:800;margin:8px 0;">${evm_value:,.2f}</div><div style="color:#64748b;font-size:0.85rem;">Base / ETH</div></div>', unsafe_allow_html=True)
 
-# Cards layout split
+# Cards split
 col_left, col_right = st.columns(2)
 
 with col_left:
@@ -226,16 +212,10 @@ with col_left:
             curr_p = float(r["Current Price"])
             cost_basis = qty * buy_p
             
-            # ✅ FIXED: Improved date parsing with error handling (Line 150-165)
-            b_date = r["Buy Date"]
-            if isinstance(b_date, str):
-                try:
-                    b_date = datetime.strptime(b_date, "%Y-%m-%d").date()
-                except:
-                    b_date = date.today()
-            elif isinstance(b_date, (datetime, date)):
-                if isinstance(b_date, datetime):
-                    b_date = b_date.date()
+            try:
+                b_date = datetime.strptime(str(r["Buy Date"]), "%Y-%m-%d").date() if isinstance(r["Buy Date"], str) else r["Buy Date"]
+            except:
+                b_date = date.today()
             
             if r["Status"] == "Active":
                 current_value = qty * curr_p
@@ -243,17 +223,12 @@ with col_left:
                 net_pl = current_value - cost_basis
                 curr_price_str = format_price(curr_p)
             else:
-                sell_p = float(r["Sell Price"]) if pd.notna(r["Sell Price"]) and r["Sell Price"] else 0.0
+                sell_p = float(r["Sell Price"])
                 current_value = qty * sell_p
-                
-                # ✅ FIXED: Better Sell Date handling (Line 161-165)
-                s_date = date.today()
-                if pd.notna(r["Sell Date"]) and str(r["Sell Date"]).strip():
-                    try:
-                        s_date = datetime.strptime(str(r["Sell Date"]), "%Y-%m-%d").date()
-                    except:
-                        s_date = date.today()
-                
+                try:
+                    s_date = datetime.strptime(str(r["Sell Date"]), "%Y-%m-%d").date() if r["Sell Date"] else date.today()
+                except:
+                    s_date = date.today()
                 hold_days = (s_date - b_date).days
                 net_pl = current_value - cost_basis
                 curr_price_str = f"Sold @ {format_price(sell_p)}"
@@ -270,7 +245,7 @@ with col_left:
                     <div>
                         <span class="chain-badge {badge_class}">{r["Chain"]}</span>
                         <h4 style="margin: 4px 0; color: #f8fafc; font-size: 1.4rem;">{r["Token"]}</h4>
-                        <p style="color: #94a3b8; font-size: 0.85rem; margin: 4px 0;">Qty: <b>{qty:,.4f}</b> | Buy Date: {b_date.strftime("%b %d, %Y") if isinstance(b_date, date) else b_date}</p>
+                        <p style="color: #94a3b8; font-size: 0.85rem; margin: 4px 0;">Qty: <b>{qty:,.4f}</b> | Buy Date: {b_date}</p>
                     </div>
                     <div style="text-align: right;">
                         <div class="{pl_class}" style="display: inline-block; font-size: 1rem; margin-bottom: 8px;">
