@@ -121,15 +121,17 @@ with st.sidebar.form("token_form", clear_on_submit=True):
     buy_date = st.date_input("Purchase Date:", date.today())
     status = st.selectbox("Status:", ["Active", "Sold (Position Closed)"])
     
-    sell_price = 0.0
-    sell_date = ""
-    if status == "Sold (Position Closed)":
-        sell_price = st.number_input("Sell Price (USD):", min_value=0.0, value=0.0, format="%.8f")
-        sell_date = st.date_input("Sell Date:", date.today()).strftime("%Y-%m-%d")
+    # Form input value parsing fixed
+    input_sell_price = st.number_input("Sell Price (USD) - *If Sold*:", min_value=0.0, value=0.0, format="%.8f")
+    sell_date = st.date_input("Sell Date - *If Sold*:", date.today())
 
     submit_btn = st.form_submit_button("Submit Entry 🚀")
 
 if submit_btn and token_name:
+    # Logic condition fix for parsing exact form inputs
+    final_sell_price = float(input_sell_price) if status == "Sold (Position Closed)" else 0.0
+    final_sell_date = sell_date.strftime("%Y-%m-%d") if status == "Sold (Position Closed)" else ""
+    
     new_record = {
         "Chain": chain_choice,
         "Token": token_name,
@@ -138,24 +140,23 @@ if submit_btn and token_name:
         "Buy Price": float(new_buy_price),
         "Buy Date": buy_date.strftime("%Y-%m-%d"),
         "Status": status,
-        "Sell Price": float(sell_price),
-        "Sell Date": str(sell_date)
+        "Sell Price": final_sell_price,
+        "Sell Date": final_sell_date
     }
     st.session_state.portfolio_records.append(new_record)
     save_data(st.session_state.portfolio_records)
-    st.toast(f"Added {token_name} permanently!")
+    st.toast(f"Added {token_name} successfully!")
     st.rerun()
 
-# --- FIXED DELETE RECORD MODULE ---
+# Delete Record functionality
 st.sidebar.markdown("---")
 st.sidebar.subheader("🗑️ Delete Record")
 if len(records) > 0:
-    # Creating dictionary with readable tokens mapping to their actual index
     token_options = {f"{t['Token']} ({t['Chain']}) - Ref #{i}": i for i, t in enumerate(records)}
     selected_option = st.sidebar.selectbox("Select Token to Delete:", list(token_options.keys()))
     
     if st.sidebar.button("Delete Selected ❌", use_container_width=True):
-        idx_to_drop = token_options[selected_option] # Get safe accurate integer index
+        idx_to_drop = token_options[selected_option]
         st.session_state.portfolio_records.pop(idx_to_drop)
         save_data(st.session_state.portfolio_records)
         st.toast("Record deleted successfully!")
@@ -180,12 +181,14 @@ for r in records:
         current_value = qty * curr_p
         if r["Chain"] == "Solana": solana_value += current_value
         else: evm_value += current_value
+        total_portfolio_value += current_value
     else:
-        sell_p = float(r["Sell Price"])
-        current_value = qty * sell_p
+        # Fixed realized calculations formula
+        s_price = float(r.get("Sell Price", 0.0))
+        realized_value = qty * s_price
+        total_portfolio_value += realized_value
 
     total_investment += cost_basis
-    total_portfolio_value += current_value
 
 total_net_profit = total_portfolio_value - total_investment
 total_pl_pct = (total_net_profit / total_investment * 100) if total_investment > 0 else 0.0
@@ -193,15 +196,15 @@ total_pl_pct = (total_net_profit / total_investment * 100) if total_investment >
 # Metrics Header Panels
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.markdown(f'<div class="metric-card"><div style="color:#94a3b8;font-size:0.8rem;font-weight:700;">NET WORTH VALUE</div><div style="color:#f8fafc;font-size:1.8rem;font-weight:800;margin:8px 0;">${total_portfolio_value:,.2f}</div><div style="color:#64748b;font-size:0.85rem;">Cost: ${total_investment:,.2f}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><div style="color:#94a3b8;font-size:0.8rem;font-weight:700;">TOTAL PORTFOLIO VALUE</div><div style="color:#f8fafc;font-size:1.8rem;font-weight:800;margin:8px 0;">${total_portfolio_value:,.2f}</div><div style="color:#64748b;font-size:0.85rem;">Cost Basis: ${total_investment:,.2f}</div></div>', unsafe_allow_html=True)
 with col2:
     p_sign = "+" if total_net_profit >= 0 else ""
     g_style = "color: #10b981;" if total_net_profit >= 0 else "color: #ef4444;"
-    st.markdown(f'<div class="metric-card"><div style="color:#94a3b8;font-size:0.8rem;font-weight:700;">NET PROFIT / LOSS</div><div style="{g_style}font-size:1.8rem;font-weight:800;margin:8px 0;">{p_sign}${total_net_profit:,.2f}</div><div style="{g_style}font-size:0.85rem;font-weight:700;">{p_sign}{total_pl_pct:.2f}% ROI</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><div style="color:#94a3b8;font-size:0.8rem;font-weight:700;">NET PROFIT / LOSS (P&L)</div><div style="{g_style}font-size:1.8rem;font-weight:800;margin:8px 0;">{p_sign}${total_net_profit:,.2f}</div><div style="{g_style}font-size:0.85rem;font-weight:700;">{p_sign}{total_pl_pct:.2f}% ROI</div></div>', unsafe_allow_html=True)
 with col3:
-    st.markdown(f'<div class="metric-card"><div style="color:#14f195;font-size:0.8rem;font-weight:700;">SOLANA BAGS</div><div style="color:#f8fafc;font-size:1.8rem;font-weight:800;margin:8px 0;">${solana_value:,.2f}</div><div style="color:#64748b;font-size:0.85rem;">Active Bags</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><div style="color:#14f195;font-size:0.8rem;font-weight:700;">SOLANA BAGS</div><div style="color:#f8fafc;font-size:1.8rem;font-weight:800;margin:8px 0;">${solana_value:,.2f}</div><div style="color:#64748b;font-size:0.85rem;">Active Holdings</div></div>', unsafe_allow_html=True)
 with col4:
-    st.markdown(f'<div class="metric-card"><div style="color:#3b82f6;font-size:0.8rem;font-weight:700;">EVM BAGS</div><div style="color:#f8fafc;font-size:1.8rem;font-weight:800;margin:8px 0;">${evm_value:,.2f}</div><div style="color:#64748b;font-size:0.85rem;">Base / ETH</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><div style="color:#3b82f6;font-size:0.8rem;font-weight:700;">EVM BAGS</div><div style="color:#f8fafc;font-size:1.8rem;font-weight:800;margin:8px 0;">${evm_value:,.2f}</div><div style="color:#64748b;font-size:0.85rem;">Base / ETH Holdings</div></div>', unsafe_allow_html=True)
 
 # Cards split
 col_left, col_right = st.columns(2)
@@ -226,7 +229,8 @@ with col_left:
                 net_pl = current_value - cost_basis
                 curr_price_str = format_price(curr_p)
             else:
-                sell_p = float(r["Sell Price"])
+                # Realized display calculations logic
+                sell_p = float(r.get("Sell Price", 0.0))
                 current_value = qty * sell_p
                 try:
                     s_date = datetime.strptime(str(r["Sell Date"]), "%Y-%m-%d").date() if r["Sell Date"] else date.today()
@@ -247,7 +251,7 @@ with col_left:
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                     <div>
                         <span class="chain-badge {badge_class}">{r["Chain"]}</span>
-                        <h4 style="margin: 4px 0; color: #f8fafc; font-size: 1.4rem;">{r["Token"]}</h4>
+                        <h4 style="margin: 4px 0; color: #f8fafc; font-size: 1.4rem;">{r["Token"]} <span style="font-size:0.8rem; color:#a78bfa;">({r["Status"]})</span></h4>
                         <p style="color: #94a3b8; font-size: 0.85rem; margin: 4px 0;">Qty: <b>{qty:,.4f}</b> | Buy Date: {b_date}</p>
                     </div>
                     <div style="text-align: right;">
@@ -262,7 +266,7 @@ with col_left:
                     <div>Buy: <span style="color: #e2e8f0; font-weight: 600;">{format_price(buy_p)}</span></div>
                     <div>Current: <span style="color: #e2e8f0; font-weight: 600;">{curr_price_str}</span></div>
                     <div>Invested: <span style="color: #e2e8f0; font-weight: 600;">{format_price(cost_basis)}</span></div>
-                    <div>Value: <span style="color: #a78bfa; font-weight: 700;">{format_price(current_value)}</span></div>
+                    <div>Net Value: <span style="color: #a78bfa; font-weight: 700;">{format_price(current_value)}</span></div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
