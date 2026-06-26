@@ -96,7 +96,7 @@ def save_data(data):
     with open(DB_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
-# Load current records to session state so it dynamic updates
+# Load current records to session state
 if "portfolio_records" not in st.session_state:
     st.session_state.portfolio_records = load_data()
 
@@ -146,17 +146,19 @@ if submit_btn and token_name:
     st.toast(f"Added {token_name} permanently!")
     st.rerun()
 
-# Delete Record functionality
+# --- FIXED DELETE RECORD MODULE ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("🗑️ Delete Record")
 if len(records) > 0:
-    token_list = [f"{t['Token']} ({t['Chain']}) - Index {idx}" for idx, t in enumerate(records)]
-    selected_to_delete = st.sidebar.selectbox("Select Token to Delete:", token_list)
+    # Creating dictionary with readable tokens mapping to their actual index
+    token_options = {f"{t['Token']} ({t['Chain']}) - Ref #{i}": i for i, t in enumerate(records)}
+    selected_option = st.sidebar.selectbox("Select Token to Delete:", list(token_options.keys()))
+    
     if st.sidebar.button("Delete Selected ❌", use_container_width=True):
-        idx_to_drop = int(selected_to_delete.split("Index "))
+        idx_to_drop = token_options[selected_option] # Get safe accurate integer index
         st.session_state.portfolio_records.pop(idx_to_drop)
         save_data(st.session_state.portfolio_records)
-        st.toast("Record deleted permanently!")
+        st.toast("Record deleted successfully!")
         st.rerun()
 
 # Calculations layout main screen
